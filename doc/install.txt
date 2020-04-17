@@ -1,0 +1,6 @@
+conda create -n env_CT python=3.7
+activate env_CT 
+conda install -c anaconda spyder
+conda install -c anaconda xlrd
+conda install -c anaconda openpyxl
+conda install -c conda-forge xlsxwriter
