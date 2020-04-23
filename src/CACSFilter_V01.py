@@ -12,7 +12,7 @@ CACS inclusion criteria
 1) ReconstructionDiameter <= 230 mm
 2) SliceThickness == 3.0 mm OR (SliceThickness == 2.5mm AND Side == ['P10', 'P13', 'P29'])
 3) Modality == 'CT'
-4) ImageCommentsFilter does not include 'cta'
+4) ImageComments does not include 'cta'
 
 """
 
@@ -21,7 +21,7 @@ from TagFilter import TagFilter, DISCHARGEFilter
 # Set parameter
 filepath_discharge = 'H:/cloud/cloud_data/Projects/CACSFilter/data/discharge_tags_16042020.xlsx'
 #filepath_discharge = 'H:/cloud/cloud_data/Projects/CACSFilter/data/discharge_tags_28022020.xlsx'
-filepath_discharge_filt = 'H:/cloud/cloud_data/Projects/CACSFilter/data/discharge_tags_V01.xlsx'  
+filepath_discharge_filt = 'H:/cloud/cloud_data/Projects/CACSFilter/data/discharge_CACS_V01.xlsx'  
 
 # Create ReconstructionDiameter filter
 ReconstructionDiameterFilter = DISCHARGEFilter()
