@@ -78,8 +78,9 @@ class DISCHARGEFilter:
         self.color = ''
         self.df_filt=None
         self.updateTarget=True
+        self.operation = 'AND' # 'AND' / 'OR'
         
-    def createFilter(self, feature='', minValue=None, maxValue=None, exactValue=[], mapFunc=None, name='', color='', updateTarget=True, featFunc=None):
+    def createFilter(self, feature='', minValue=None, maxValue=None, exactValue=[], mapFunc=None, name='', color='', updateTarget=True, featFunc=None, operation ='AND'):
         """ Create normal filter
         
         :param feature: Name of the column which is filtered
@@ -106,8 +107,9 @@ class DISCHARGEFilter:
             self.name = name
         else:
             self.name = feature
+        self.operation = operation
                 
-    def createFilterJoin(self, filter0, filter1, mapFunc, name='FilterJoint', updateTarget=True, featFunc=None):
+    def createFilterJoin(self, filter0, filter1, mapFunc, name='FilterJoint', updateTarget=True, featFunc=None, operation ='AND'):
         """ Create joint filter consisting of two normal filter
         
         :param name: Name of the boolean column whcih is added to the output file
@@ -127,8 +129,10 @@ class DISCHARGEFilter:
         self.updateTarget = updateTarget
         self.mapFunc = mapFunc
         self.featFunc = featFunc
-        
-    def includeString(self, s):
+        self.operation = operation
+    
+    @staticmethod
+    def includeString(s):
         def func(v):
             if type(v) == str:
                 return s in v.lower()
@@ -136,7 +140,8 @@ class DISCHARGEFilter:
                 return False
         return func
     
-    def includeNotString(self, s):
+    @staticmethod
+    def includeNotString(s):
         def func(v):
             if type(v) == str:
                 return not (s in v.lower())
@@ -144,6 +149,30 @@ class DISCHARGEFilter:
                 return True
         return func
         
+    @staticmethod
+    def includeStringList(sList):
+        def func(v):
+            if type(v) == str:
+                for s in sList:
+                    if s in v.lower():
+                        return True
+                return False
+            else:
+                return False
+        return func
+
+    @staticmethod
+    def includeNotStringList(sList):
+        def func(v):
+            if type(v) == str:
+                for s in sList:
+                    if (s in v.lower()):
+                        return False
+                return True
+            else:
+                return True
+        return func
+    
     def filter(self, df):
         """ Filter dataframe df
         
@@ -242,12 +271,12 @@ class TagFilter:
         
         # Create confidence dataframe
         #df_confidence = df + pd.DataFrame(confidence, columns=['Confidence'])
-        df_confidence = pd.DataFrame(confidence, columns=['Confidence'])
+        df_confidence = pd.DataFrame(confidence, columns=[Target + '_confidence'])
         
         return df_confidence, C, ACC
           
         
-    def discharge_filter(self, filepath_discharge, filepath_discharge_filt, discharge_filter_list=[], Target='CACS'):
+    def discharge_filter(self, filepath_discharge, filepath_discharge_filt, discharge_targets=[]):
         """ Filter DISCHARGE excel sheet
         
         :param filepath_discharge: Filpath of the input DISCHARGE excel sheet
@@ -260,35 +289,60 @@ class TagFilter:
         :type Target: str
         """
         
+        # defaultdict(lambda: None, {'FILTER': discharge_filter_alt01, 'TARGET': 'CACS_alt01', 'COLOR': 'blue'})
+        
         # Read discharge tags from linear sheet
         print('Reading file', filepath_discharge)
         sheet = 'linear'
         df = pd.read_excel(filepath_discharge, sheet) 
-    
-        # Iterate over filters
-        df_Target = pd.DataFrame(data=True, index=df.index, columns = [Target])
-        for filt in discharge_filter_list:
-            print('Apply filter:', filt.name)
-            # Filtr dataframe
-            if filt.mapFunc:
-                df_filt = filt.filter(df)       
-            # Append filter column
-            df[filt.name + '_OK'] = df_filt
-            # Update df_target
-            if filt.updateTarget:
-                df_Target[Target] = df_Target[Target] & df_filt
-            
-        # Compute Target column
+        
         df_linear = df.copy()
-        df_linear[Target] = df_Target[Target]
         
-        # Compute confidence
-        df_confidence,  C, ACC = self.confidencePredictor(df_linear, discharge_filter_list, Target = Target)
-        print('Accuracy:', ACC)
-        print('Confusion matrix:', C)
-        df_linear = pd.concat([df_linear,df_confidence], axis=1)
+        #n = df_linear.shape[0]
+        #df_linear = df_linear[n-15:]
+
         
+        # Iterate over discharge_targets and add features
+        df_TargetList=[]
+        for target in discharge_targets:
+            # Iterate over filters
+            discharge_filter_list = target['FILTER']
+            df_Target = pd.DataFrame(data=True, index=df_linear.index, columns = [target['TARGET']])
+            for filt in discharge_filter_list:
+                print('Target:', target['TARGET'],'Apply filter:', filt.name, 'Operation', filt.operation)
+                # Filtr dataframe
+                if filt.mapFunc:
+                    df_filt = filt.filter(df_linear)       
+                # Append filter column
+                df_linear[target['TARGET'] + '_' + filt.name] = df_filt
+                
+                #print('df_filt', df_filt)
+                
+                # Update df_target
+                if filt.updateTarget:
+                    if filt.operation == 'AND':
+                        df_Target[target['TARGET']] = df_Target[target['TARGET']] & df_filt
+                    elif filt.operation == 'OR':
+                        df_Target[target['TARGET']] = df_Target[target['TARGET']] | df_filt
+                
+                #print('df_Target', df_Target[target['TARGET']])
+                
+            df_TargetList.append(df_Target)
+                
+        # # Iterate over discharge_targets and add target column
+        for i, target in enumerate(discharge_targets):
+            df_linear[target['TARGET']] = df_TargetList[i]
+            
+            #print('df_Targeti', df_TargetList[i])
+            
+            # Compute confidence
+            df_confidence, C, ACC = self.confidencePredictor(df_linear, discharge_filter_list, Target = target['TARGET'])
+            print('Accuracy:', ACC)
+            print('Confusion matrix:', C)
+            df_linear = pd.concat([df_linear,df_confidence], axis=1)
+            
         # Create ordered list
+        df_ordered = df_linear.copy()
         df_ordered = df_linear.set_index(['PatientID','StudyInstanceUID','SeriesInstanceUID'])
         df_ordered.sort_index(inplace=True)
         
@@ -300,29 +354,53 @@ class TagFilter:
         workbook  = writer.book
         
         # Highlight Target
-        print('Highlight Target')
-        format_red = workbook.add_format({'font_color': 'red'})
-        for i in range(df_ordered[Target].shape[0]):
-            if df_ordered[Target][i]:
-                first_row=i+1
-                last_row=i+1
-                first_col=0
-                last_col=1000
-                writer.sheets['ordered'].conditional_format(first_row, first_col, last_row, last_col,{'type': 'no_blanks','format': format_red})
-                writer.sheets['ordered'].conditional_format(first_row, first_col, last_row, last_col,{'type': 'blanks','format': format_red})
-    
-        # Highlight features
-        for filt in discharge_filter_list:
-            if filt.color:
-                format_red = workbook.add_format({'font_color': filt.color})
-                for i in range(filt.df_filt.shape[0]):
-                    if filt.df_filt[i]:
-                        first_row=i+1
-                        last_row=i+1
-                        first_col=0
-                        last_col=1000
-                        writer.sheets['ordered'].conditional_format(first_row, first_col, last_row, last_col,{'type': 'no_blanks','format': format_red})
-                        writer.sheets['ordered'].conditional_format(first_row, first_col, last_row, last_col,{'type': 'blanks','format': format_red})
+        for target in discharge_targets:
+            print('Highlight Target:' + target['TARGET'])
+            formatColor = workbook.add_format({'font_color': target['COLOR']})
+            print('color', target['COLOR'])
+            for i in range(df_ordered[target['TARGET']].shape[0]):
+                if df_ordered[target['TARGET']][i]:
+                    first_row=i+1
+                    last_row=i+1
+                    first_col=2
+                    last_col=1000
+                    writer.sheets['ordered'].conditional_format(first_row, first_col, last_row, last_col,{'type': 'no_blanks','format': formatColor})
+                    writer.sheets['ordered'].conditional_format(first_row, first_col, last_row, last_col,{'type': 'blanks','format': formatColor})
         
+            # # Highlight features
+            # for filt in discharge_filter_list:
+            #     if filt.color:
+            #         format_red = workbook.add_format({'font_color': filt.color})
+            #         for i in range(filt.df_filt.shape[0]):
+            #             if filt.df_filt[i]:
+            #                 first_row=i+1
+            #                 last_row=i+1
+            #                 first_col=0
+            #                 last_col=1000
+            #                 writer.sheets['ordered'].conditional_format(first_row, first_col, last_row, last_col,{'type': 'no_blanks','format': format_red})
+            #                 writer.sheets['ordered'].conditional_format(first_row, first_col, last_row, last_col,{'type': 'blanks','format': format_red})
+        
+        # Add sheet for number of highligted CACS per patient
+        columns = ['PatientID']
+        for target in discharge_targets:
+            columns.append(target['TARGET'] + '_num')
+        columns.append('Modality_CT_FOUND')
+        columns.append('Confidence_alt01_min')
+        
+        df_Patient = pd.DataFrame(columns = columns)
+        patientList = list(df_linear['PatientID'].unique())
+        for p, patient in enumerate(patientList):
+            df_pat = df_linear[df_linear['PatientID']==patient]
+            NumTarget=[]
+            for i, target in enumerate(discharge_targets):
+                NumTarget.append((df_pat[target['TARGET']]==True).sum())
+            Modality_CT = 'CT' in list(df_pat['Modality'])
+            Confidence_alt01 = min(list(df_pat['CACS_alt01_confidence']))
+            df_Patient.loc[p] = [patient] + NumTarget + [Modality_CT, Confidence_alt01]
+        #df_Patient['Modality_CT'] = df_linear['Modality']
+        df_to_excel(writer, "patients", df_Patient)  
+            
+        # Write excel sheet
         writer.save()
+        
         return 
